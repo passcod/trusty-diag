@@ -31,6 +31,14 @@ struct Opt {
     #[structopt(long)]
     ipv6: bool,
 
+    /// Do not perform a raw query
+    #[structopt(long)]
+    no_raw: bool,
+
+    /// Do not perform resolution
+    #[structopt(long)]
+    no_resolve: bool,
+
     /// DNS Server to query
     #[structopt(name = "SERVER")]
     server: String,
@@ -70,27 +78,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     printb!("<> Parsing server address");
     let address = opt.server.parse()?;
 
-    printb!("<> Connecting to server");
-    let stream = UdpClientStream::<UdpSocket>::new(address);
-    let client = AsyncClient::connect(stream);
-    let (mut client, bg) = runtime.block_on(client)?;
-
-    // Spawn background worker
-    runtime.spawn(bg);
-
     printb!("<> Parsing name to query");
     let name = Name::from_str(&opt.name)?;
     let rtype = RecordType::from_str(&opt.record)?;
 
-    printb!("<> Querying with raw client");
-    let query = client.query(name.clone(), DNSClass::IN, rtype);
-    let response = runtime.block_on(query)?;
+    if !opt.no_raw {
+        printb!("<> Connecting to server");
+        let stream = UdpClientStream::<UdpSocket>::new(address);
+        let client = AsyncClient::connect(stream);
+        let (mut client, bg) = runtime.block_on(client)?;
 
-    let answers: &[Record] = response.answers();
+        // Spawn background worker
+        runtime.spawn(bg);
 
-    printb!("<> Got {} records", answers.len());
-    for answer in answers {
-        println!("{:?}", answer.rdata());
+        printb!("<> Querying with raw client");
+        let query = client.query(name.clone(), DNSClass::IN, rtype);
+        let response = runtime.block_on(query)?;
+
+        let answers: &[Record] = response.answers();
+
+        printb!("<> Got {} records", answers.len());
+        for answer in answers {
+            println!("{:?}", answer.rdata());
+        }
+    }
+
+    if opt.no_resolve {
+        return Ok(());
     }
 
     match rtype {
@@ -138,7 +152,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     opts.use_hosts_file = false;
 
     printb!(" > Concurrent requests: false");
-    opts.num_concurrent_reqs = 1;
+    opts.num_concurrent_reqs = 0;
 
     if opt.ipv6 {
         printb!(" > IPv6: true");
